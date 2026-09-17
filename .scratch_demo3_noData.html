@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>WMS 3D — Estoque Real</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel-bg: rgba(20, 26, 40, 0.92);
+    --panel-border: rgba(255,255,255,0.12);
+    --text: #eef1f8;
+    --text-dim: #9aa4b8;
+    --accent: #5b8def;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #eef1f6;
+      --panel-bg: rgba(255,255,255,0.94);
+      --panel-border: rgba(0,0,0,0.1);
+      --text: #1a2030;
+      --text-dim: #5a6478;
+      --accent: #3a6fd8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1420;
+    --panel-bg: rgba(20, 26, 40, 0.92);
+    --panel-border: rgba(255,255,255,0.12);
+    --text: #eef1f8;
+    --text-dim: #9aa4b8;
+    --accent: #5b8def;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    overflow: hidden;
+  }
+  #canvas-holder { position: absolute; inset: 0; cursor: grab; }
+  #canvas-holder.dragging-pallet { cursor: grabbing; }
+  #canvas-holder.dragging-cam { cursor: grabbing; }
+  #canvas-holder.edit-mode { cursor: crosshair; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  #title {
+    position: absolute; top: 16px; left: 16px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 10px 16px;
+    max-width: min(360px, 46vw);
+    backdrop-filter: blur(6px);
+    pointer-events: none;
+  }
+  #title h1 { font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+  #title p { font-size: 12px; margin: 0; color: var(--text-dim); }
+
+  #legend {
+    position: absolute; top: 16px; right: 16px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    backdrop-filter: blur(6px);
+    font-size: 11.5px;
+    pointer-events: none;
+    max-height: 70vh;
+    overflow-y: auto;
+    max-width: 220px;
+  }
+  #legend h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin: 0 0 8px; font-weight: 600; }
+  .legend-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
+  #edit-legend {
+    position: absolute; top: 16px; right: 16px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    backdrop-filter: blur(6px);
+    font-size: 12px;
+    pointer-events: none;
+    display: none;
+  }
+  #edit-legend.show { display: block; }
+  #edit-legend h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin: 0 0 8px; font-weight: 600; }
+
+  #panel {
+    position: absolute; bottom: 16px; left: 16px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    min-width: 260px;
+    max-width: min(340px, 90vw);
+    max-height: 60vh;
+    overflow-y: auto;
+    backdrop-filter: blur(6px);
+    transform: translateY(140%);
+    transition: transform 0.25s ease;
+    pointer-events: none;
+  }
+  #panel.visible { transform: translateY(0); }
+  #panel h2 { font-size: 15px; margin: 0 0 10px; }
+  #panel .row { display: flex; justify-content: space-between; font-size: 12.5px; padding: 4px 0; border-bottom: 1px dashed var(--panel-border); }
+  #panel .row:last-child { border-bottom: none; }
+  #panel .row .k { color: var(--text-dim); }
+  #panel .row .v { font-weight: 600; text-align: right; }
+  #panel .close { position: absolute; top: 10px; right: 12px; cursor: pointer; color: var(--text-dim); font-size: 16px; background: none; border: none; pointer-events: auto; }
+  #panel .prod-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin: 12px 0 6px; font-weight: 600; }
+  #panel .prod-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+  #panel .prod-row .code { color: var(--text-dim); font-family: monospace; }
+
+  #hint {
+    position: absolute; bottom: 16px; right: 16px;
+    font-size: 11.5px; color: var(--text-dim);
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 8px 12px;
+    backdrop-filter: blur(6px);
+    max-width: 260px;
+    text-align: right;
+    pointer-events: none;
+  }
+
+  #toast {
+    position: absolute; top: 16px; left: 50%; transform: translate(-50%, -140%);
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 8px 16px;
+    font-size: 12.5px;
+    backdrop-filter: blur(6px);
+    transition: transform 0.25s ease;
+    pointer-events: none;
+  }
+  #toast.show { transform: translate(-50%, 0); }
+
+  #action-bar {
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column-reverse; align-items: center; gap: 10px;
+    z-index: 5;
+  }
+
+  #edit-toggle {
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    padding: 10px 20px; border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    color: var(--text);
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+  }
+  #edit-toggle.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  #block-toggle {
+    font-family: inherit; font-size: 12.5px; font-weight: 600;
+    padding: 8px 16px; border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    color: var(--text);
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+    display: none;
+  }
+  #block-toggle.show { display: block; }
+  #block-toggle.active { background: #b985e6; color: #fff; border-color: #b985e6; }
+
+  #block-toolbar {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    backdrop-filter: blur(6px);
+    text-align: center;
+    font-size: 12px;
+    display: none;
+  }
+  #block-toolbar.show { display: block; }
+  #block-toolbar .count { color: var(--text-dim); margin-bottom: 8px; }
+  #block-toolbar button {
+    font-family: inherit; font-size: 12px; font-weight: 600;
+    padding: 6px 12px; border-radius: 8px; border: 1px solid var(--panel-border);
+    background: transparent; color: var(--text); cursor: pointer; margin: 0 4px;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-holder"></div>
+
+<div id="title">
+  <h1>📦 WMS 3D — Estoque real</h1>
+  <p id="title-desc">344 paletes carregados de 11 ruas (Bloco/Quadra). Arraste um palete até uma vaga livre.</p>
+</div>
+
+<div id="legend">
+  <h2>Ruas (Bloco / Quadra)</h2>
+  <div id="legend-list"></div>
+</div>
+
+<div id="edit-legend">
+  <h2>Modo de edição de layout</h2>
+  <div class="legend-row"><span class="swatch" style="background:#4caf6f"></span>Adicionar posição na rua</div>
+  <div class="legend-row"><span class="swatch" style="background:#5bc8de"></span>Empilhar mais um andar</div>
+  <div class="legend-row"><span class="swatch" style="background:#b985e6"></span>Criar rua nova</div>
+  <div class="legend-row"><span class="swatch" style="background:#e05252"></span>Remover (só o topo da pilha)</div>
+</div>
+
+<div id="panel">
+  <button class="close" onclick="deselect()">✕</button>
+  <h2 id="p-unit">—</h2>
+  <div class="row"><span class="k">Rua</span><span class="v" id="p-rua">—</span></div>
+  <div class="row"><span class="k">Andar</span><span class="v" id="p-andar">—</span></div>
+  <div class="row"><span class="k">Posição (lote)</span><span class="v" id="p-pos">—</span></div>
+  <div class="row"><span class="k">Qtd. total</span><span class="v" id="p-qtd">—</span></div>
+  <div class="prod-title">Produtos neste palete</div>
+  <div id="p-produtos"></div>
+</div>
+
+<div id="toast"></div>
+
+<div id="action-bar">
+  <button id="edit-toggle" onclick="toggleEditMode()">🛠️ Editar layout do armazém</button>
+  <button id="block-toggle" onclick="toggleBlockMode()">🔀 Selecionar blocos para mover</button>
+  <div id="block-toolbar">
+    <div class="count" id="block-count">0 ruas selecionadas</div>
+    <button onclick="rotateSelectedRuas()">↻ Girar 90°</button>
+    <button onclick="clearSelectedRuas()">🧹 Limpar seleção</button>
+  </div>
+</div>
+
+<div id="hint">Arraste o fundo para girar · Scroll para zoom<br>Arraste um palete: vagas livres acendem em verde — solte em cima de uma para mover</div>
+
+
+<script>
+(function () {
+  // ---------- Dados reais carregados do arquivo enviado ----------
+  const RAW = JSON.parse(document.getElementById("warehouse-data").textContent);
+  const RUAS = RAW.RUAS;               // [{nome, bloco, quadra, cor}]
+  const PALETES_RAW = RAW.PALETES;     // [{unitizador, ruaIdx, andar, pos, produtos:[{codigo,qtd}], totalQtd}]
+
+  // Capacidade máxima reservada no grid 3D (permite crescer via modo de edição)
+  const MAX_RUAS = Math.max(RUAS.length + 2, 12);
+  const MAX_POS = Math.max(Math.max(...PALETES_RAW.map(p => p.pos)) + 4, 44);
+  const MAX_ANDARES = 4; // esse armazém físico tem exatamente 4 andares
+
+  const posSpacing = 1.55;
+  const ruaSpacing = 4.6;
+  const andarHeight = 1.9;
+
+  // Cada rua tem sua própria origem (x,z) e orientação — assim dá pra mover e girar
+  // blocos inteiros de forma independente, sem depender de um índice de linha fixo.
+  const startX0 = -((MAX_POS - 1) * posSpacing) / 2;
+  const startZ0 = -((MAX_RUAS - 1) * ruaSpacing) / 2;
+  RUAS.forEach((rua, i) => {
+    rua.origin = { x: startX0, z: startZ0 + i * ruaSpacing };
+    rua.orientation = "EW"; // leste-oeste (varia em X) — todas nascem assim
+  });
+
+  function slotToWorld(ruaIdx, andar, pos) {
+    const rua = RUAS[ruaIdx];
+    const d = (pos - 1) * posSpacing;
+    const x = rua.orientation === "EW" ? rua.origin.x + d : rua.origin.x;
+    const z = rua.orientation === "NS" ? rua.origin.z + d : rua.origin.z;
+    return { x, y: (andar - 1) * andarHeight, z };
+  }
+
+  function slotKey(ruaIdx, andar, pos) { return ruaIdx + "_" + andar + "_" + pos; }
+
+  // 'built' = estrutura física que existe hoje (só sabemos onde HÁ palete; vagas
+  // vazias não constam no arquivo de origem — use o modo de edição pra declarar
+  // capacidade extra e então poder arrastar paletes pra lá).
+  const built = new Set();
+  const occupied = new Map();
+  let selectedRuas = new Set(); // ruas selecionadas no submodo "mover blocos"
+  const PALETES = PALETES_RAW.map(raw => {
+    const p = {
+      unitizador: raw.unitizador,
+      ruaIdx: raw.ruaIdx,
+      andar: raw.andar,
+      pos: raw.pos,
+      produtos: raw.produtos,
+      totalQtd: raw.totalQtd,
+      cor: RUAS[raw.ruaIdx].cor,
+      rua: RUAS[raw.ruaIdx].nome,
+    };
+    const key = slotKey(p.ruaIdx, p.andar, p.pos);
+    built.add(key);
+    occupied.set(key, p);
+    return p;
+  });
+
+  // ---------- Legenda ----------
+  function renderLegend() {
+    const legendList = document.getElementById("legend-list");
+    legendList.innerHTML = "";
+    RUAS.forEach(rua => {
+      const row = document.createElement("div");
+      row.className = "legend-row";
+      row.innerHTML = `<span class="swatch" style="background:#${rua.cor.toString(16).padStart(6,'0')}"></span>${rua.nome}`;
+      legendList.appendChild(row);
+    });
+  }
+  renderLegend();
+
+  // ---------- Cena Three.js ----------
+  const holder = document.getElementById("canvas-holder");
+  const scene = new THREE.Scene();
+  scene.background = null;
+
+  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 800);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  holder.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(20, 40, 20);
+  scene.add(dirLight);
+  const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+  fillLight.position.set(-20, 10, -20);
+  scene.add(fillLight);
+
+  const world = new THREE.Group();
+  scene.add(world);
+
+  const floorGeo = new THREE.PlaneGeometry(160, 120);
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x2a3142, roughness: 1, metalness: 0 });
+  const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.position.y = -0.01;
+  world.add(floorMesh);
+
+  const gridHelper = new THREE.GridHelper(160, 80, 0x4a5570, 0x2a3142);
+  world.add(gridHelper);
+
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.9 });
+
+  // Centro da câmera = centroide real dos dados carregados (média das posições 3D reais)
+  const camTarget = (() => {
+    let sx = 0, sz = 0;
+    PALETES.forEach(p => {
+      const w = slotToWorld(p.ruaIdx, p.andar, p.pos);
+      sx += w.x; sz += w.z;
+    });
+    return { x: sx / PALETES.length, y: 2.2, z: sz / PALETES.length };
+  })();
+
+  const meshes = []; // cargo meshes (paletes clicáveis/arrastáveis)
+  const cargoSize = Math.max(0.9, Math.min(1.3, posSpacing * 0.82));
+  function createPalletMesh(p) {
+    const group = new THREE.Group();
+
+    const base = new THREE.Mesh(new THREE.BoxGeometry(cargoSize + 0.15, 0.2, cargoSize + 0.15), woodMat);
+    group.add(base);
+
+    const cargoMat = new THREE.MeshStandardMaterial({ color: p.cor, roughness: 0.6 });
+    const cargo = new THREE.Mesh(new THREE.BoxGeometry(cargoSize, 0.95, cargoSize), cargoMat);
+    cargo.position.y = 0.2 + 0.48;
+    cargo.userData.data = p;
+    group.add(cargo);
+
+    const selectEdges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(cargoSize * 1.06, 0.95 * 1.08, cargoSize * 1.06)),
+      new THREE.LineBasicMaterial({ color: 0xffffff })
+    );
+    selectEdges.position.y = cargo.position.y;
+    selectEdges.visible = false;
+    group.add(selectEdges);
+
+    const blockEdges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(cargoSize * 1.12, 0.95 * 1.15, cargoSize * 1.12)),
+      new THREE.LineBasicMaterial({ color: 0xf5d442 })
+    );
+    blockEdges.position.y = cargo.position.y;
+    blockEdges.visible = false;
+    group.add(blockEdges);
+
+    p.group = group;
+    p.cargo = cargo;
+    p.selectEdges = selectEdges;
+    p.blockEdges = blockEdges;
+
+    const pos0 = slotToWorld(p.ruaIdx, p.andar, p.pos);
+    group.position.set(pos0.x, pos0.y, pos0.z);
+
+    world.add(group);
+    meshes.push(cargo);
+  }
+  PALETES.forEach(createPalletMesh);
+
+  // ---------- Visual da estrutura física (vagas construídas, vazias) ----------
+  const structureGroup = new THREE.Group();
+  world.add(structureGroup);
+  let structureClickTargets = []; // caixas invisíveis clicáveis (só existem pra permitir selecionar vagas vazias)
+
+  function rebuildStructureVisuals() {
+    while (structureGroup.children.length) structureGroup.remove(structureGroup.children[0]);
+    structureClickTargets.forEach(m => world.remove(m));
+    structureClickTargets = [];
+    built.forEach(key => {
+      if (occupied.has(key)) return;
+      const [r, a, pos] = key.split("_").map(Number);
+      const w = slotToWorld(r, a, pos);
+      const selected = selectedRuas.has(r);
+      const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(cargoSize + 0.2, 1.15, cargoSize + 0.2));
+      const mat = new THREE.LineBasicMaterial({ color: selected ? 0xf5d442 : 0x46506a });
+      const mesh = new THREE.LineSegments(geo, mat);
+      mesh.position.set(w.x, w.y + 0.58, w.z);
+      structureGroup.add(mesh);
+
+      const clickGeo = new THREE.BoxGeometry(cargoSize + 0.2, 1.15, cargoSize + 0.2);
+      const clickMat = new THREE.MeshBasicMaterial({ visible: false });
+      const clickMesh = new THREE.Mesh(clickGeo, clickMat);
+      clickMesh.position.set(w.x, w.y + 0.58, w.z);
+      clickMesh.userData.ruaIdx = r;
+      world.add(clickMesh);
+      structureClickTargets.push(clickMesh);
+    });
+  }
+  rebuildStructureVisuals();
+
+  // Câmera
+  let camTheta = Math.PI / 4, camPhi = 0.95, camRadius = 55;
+  function updateCamera() {
+    camPhi = Math.max(0.3, Math.min(1.5, camPhi));
+    camRadius = Math.max(6, Math.min(140, camRadius));
+    camera.position.set(
+      camTarget.x + camRadius * Math.sin(camPhi) * Math.sin(camTheta),
+      camTarget.y + camRadius * Math.cos(camPhi) + 3,
+      camTarget.z + camRadius * Math.sin(camPhi) * Math.cos(camTheta)
+    );
+    camera.lookAt(camTarget.x, camTarget.y, camTarget.z);
+  }
+  updateCamera();
+
+  // ---------- Marcadores de vaga livre (modo operação: arrastar palete) ----------
+  let vacancyMarkers = [];
+  function buildAllVacancyMarkers() {
+    built.forEach(key => {
+      if (occupied.has(key)) return;
+      const [r, a, pos] = key.split("_").map(Number);
+      const geo = new THREE.PlaneGeometry(cargoSize + 0.35, cargoSize + 0.35);
+      const mat = new THREE.MeshBasicMaterial({ color: 0x4caf6f, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.x = -Math.PI / 2;
+      const w = slotToWorld(r, a, pos);
+      mesh.position.set(w.x, w.y + 0.02, w.z);
+      mesh.userData.slot = { ruaIdx: r, andar: a, pos };
+      mesh.userData.baseOpacity = 0.4;
+      world.add(mesh);
+      vacancyMarkers.push(mesh);
+    });
+  }
+  function clearAllVacancyMarkers() {
+    vacancyMarkers.forEach(m => world.remove(m));
+    vacancyMarkers = [];
+    hoveredMarker = null;
+  }
+  let hoveredMarker = null;
+  function setHoveredMarker(m) {
+    if (hoveredMarker === m) return;
+    if (hoveredMarker) { hoveredMarker.material.opacity = hoveredMarker.userData.baseOpacity; hoveredMarker.scale.set(1, 1, 1); }
+    hoveredMarker = m;
+    if (hoveredMarker) { hoveredMarker.material.opacity = 0.85; hoveredMarker.scale.set(1.12, 1.12, 1.12); }
+  }
+
+  if (built.size === PALETES.length) {
+    // Não há nenhuma vaga vazia conhecida (o arquivo só traz o que está ocupado).
+    // Isso é esperado — use "Editar layout" para declarar capacidade extra.
+  }
+
+  // ---------- Modo de edição de layout ----------
+  let editMode = false;
+  let editMarkers = [];
+
+  function ruaNextPos(r) {
+    for (let pos = 1; pos <= MAX_POS; pos++) if (!built.has(slotKey(r, 1, pos))) return pos;
+    return null;
+  }
+  function columnTopAndar(r, pos) {
+    let top = 0;
+    for (let a = 1; a <= MAX_ANDARES; a++) if (built.has(slotKey(r, a, pos))) top = a;
+    return top;
+  }
+
+  function addRua() {
+    if (RUAS.length >= MAX_RUAS) { showToast("Limite de ruas do protótipo atingido"); return; }
+    const idx = RUAS.length;
+    const PALETTE = [0x5b8def,0x4caf6f,0xe6a23c,0x9b6fe0,0xe05252,0x2bb8a3,0xd88ad0,0xc9a227,0x6fa8dc,0xef8354,0x8fce9a];
+    RUAS.push({
+      nome: `Rua nova ${idx + 1}`, bloco: "--", quadra: "-", cor: PALETTE[idx % PALETTE.length],
+      origin: { x: startX0, z: startZ0 + idx * ruaSpacing }, orientation: "EW",
+    });
+    built.add(slotKey(idx, 1, 1));
+    rebuildStructureVisuals();
+    renderLegend();
+    refreshEditMarkers();
+    showToast(`Rua nova criada`);
+  }
+
+  function addPosToRua(r) {
+    const pos = ruaNextPos(r);
+    if (pos === null) { showToast("Essa rua já está no limite de posições"); return; }
+    built.add(slotKey(r, 1, pos));
+    rebuildStructureVisuals();
+    refreshEditMarkers();
+    showToast(`Nova posição adicionada em ${RUAS[r].nome}`);
+  }
+
+  function addAndarToColumn(r, pos) {
+    const top = columnTopAndar(r, pos);
+    if (top === 0 || top >= MAX_ANDARES) return;
+    built.add(slotKey(r, top + 1, pos));
+    rebuildStructureVisuals();
+    refreshEditMarkers();
+    showToast(`Andar ${top + 1} adicionado em ${RUAS[r].nome}, posição ${pos}`);
+  }
+
+  function removeCell(r, a, pos) {
+    const key = slotKey(r, a, pos);
+    if (!built.has(key)) return;
+    if (occupied.has(key)) { showToast("Tem um palete aqui — mova-o antes de remover"); return; }
+    if (a !== columnTopAndar(r, pos)) { showToast("Só dá pra remover o andar mais alto da pilha"); return; }
+    built.delete(key);
+    rebuildStructureVisuals();
+    refreshEditMarkers();
+    showToast(`Removido: ${RUAS[r].nome}, andar ${a}, posição ${pos}`);
+  }
+
+  function clearEditMarkers() {
+    editMarkers.forEach(m => world.remove(m));
+    editMarkers = [];
+  }
+
+  function makeEditMarker(color, w, userData) {
+    const geo = new THREE.PlaneGeometry(cargoSize + 0.3, cargoSize + 0.3);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(w.x, w.y + 0.03, w.z);
+    mesh.userData = userData;
+    world.add(mesh);
+    editMarkers.push(mesh);
+  }
+
+  function makeRemoveMarker(w, userData) {
+    const geo = new THREE.BoxGeometry(cargoSize + 0.25, 1.1, cargoSize + 0.25);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xe05252, transparent: true, opacity: 0.3 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(w.x, w.y + 0.58, w.z);
+    mesh.userData = userData;
+    world.add(mesh);
+    editMarkers.push(mesh);
+  }
+
+  function refreshEditMarkers() {
+    clearEditMarkers();
+    if (!editMode) return;
+
+    RUAS.forEach((rua, r) => {
+      const pos = ruaNextPos(r);
+      if (pos !== null) makeEditMarker(0x4caf6f, slotToWorld(r, 1, pos), { type: "addPos", ruaIdx: r });
+    });
+
+    const columns = new Set();
+    built.forEach(key => { const [r, a, pos] = key.split("_").map(Number); columns.add(r + "_" + pos); });
+    columns.forEach(colKey => {
+      const [r, pos] = colKey.split("_").map(Number);
+      const top = columnTopAndar(r, pos);
+      if (top >= 1 && top < MAX_ANDARES) makeEditMarker(0x5bc8de, slotToWorld(r, top + 1, pos), { type: "addAndar", ruaIdx: r, pos });
+      const topKey = slotKey(r, top, pos);
+      if (top >= 1 && !occupied.has(topKey)) {
+        makeRemoveMarker(slotToWorld(r, top, pos), { type: "remove", ruaIdx: r, andar: top, pos });
+      }
+    });
+
+    if (RUAS.length < MAX_RUAS) makeEditMarker(0xb985e6, slotToWorld(RUAS.length, 1, 1), { type: "addRua" });
+  }
+
+  // ---------- Submodo: selecionar e mover/girar blocos (ruas) inteiros ----------
+  let blockMode = false;
+
+  function worldKey(x, andar, z) { return Math.round(x * 100) + "_" + andar + "_" + Math.round(z * 100); }
+
+  function otherRuasWorldCells(excludeSet) {
+    const cells = new Set();
+    built.forEach(key => {
+      const [r, a, pos] = key.split("_").map(Number);
+      if (excludeSet.has(r)) return;
+      const w = slotToWorld(r, a, pos);
+      cells.add(worldKey(w.x, a, w.z));
+    });
+    return cells;
+  }
+
+  function selectedCellsWithDelta(selSet, dx, dz) {
+    const cells = new Set();
+    built.forEach(key => {
+      const [r, a, pos] = key.split("_").map(Number);
+      if (!selSet.has(r)) return;
+      const w = slotToWorld(r, a, pos);
+      cells.add(worldKey(w.x + dx, a, w.z + dz));
+    });
+    return cells;
+  }
+
+  function repositionAllPallets() {
+    PALETES.forEach(p => {
+      const w = slotToWorld(p.ruaIdx, p.andar, p.pos);
+      p.group.position.set(w.x, w.y, w.z);
+    });
+  }
+
+  function updateBlockUI() {
+    document.getElementById("block-count").textContent = selectedRuas.size + (selectedRuas.size === 1 ? " rua selecionada" : " ruas selecionadas");
+    document.getElementById("block-toolbar").classList.toggle("show", blockMode && selectedRuas.size > 0);
+  }
+
+  function updateBlockHighlight() {
+    PALETES.forEach(p => { p.blockEdges.visible = selectedRuas.has(p.ruaIdx); });
+    rebuildStructureVisuals();
+    updateBlockUI();
+  }
+
+  function toggleRuaSelection(r) {
+    if (selectedRuas.has(r)) selectedRuas.delete(r); else selectedRuas.add(r);
+    updateBlockHighlight();
+  }
+
+  window.clearSelectedRuas = function () {
+    selectedRuas.clear();
+    updateBlockHighlight();
+  };
+
+  window.rotateSelectedRuas = function () {
+    if (selectedRuas.size === 0) return;
+    let falhas = [];
+    selectedRuas.forEach(r => {
+      const rua = RUAS[r];
+      const newOrient = rua.orientation === "EW" ? "NS" : "EW";
+      const proposedCells = new Set();
+      built.forEach(key => {
+        const [kr, a, pos] = key.split("_").map(Number);
+        if (kr !== r) return;
+        const d = (pos - 1) * posSpacing;
+        const x = newOrient === "EW" ? rua.origin.x + d : rua.origin.x;
+        const z = newOrient === "NS" ? rua.origin.z + d : rua.origin.z;
+        proposedCells.add(worldKey(x, a, z));
+      });
+      const blocked = otherRuasWorldCells(new Set([r]));
+      let colide = false;
+      for (const c of proposedCells) if (blocked.has(c)) { colide = true; break; }
+      if (colide) { falhas.push(rua.nome); return; }
+      rua.orientation = newOrient;
+    });
+    repositionAllPallets();
+    rebuildStructureVisuals();
+    refreshEditMarkers();
+    updateBlockHighlight();
+    showToast(falhas.length
+      ? `Giradas as ruas possíveis — bloqueado por colisão: ${falhas.join(", ")}`
+      : "Bloco(s) girado(s) 90°");
+  };
+
+  window.toggleBlockMode = function () {
+    blockMode = !blockMode;
+    const btn = document.getElementById("block-toggle");
+    btn.classList.toggle("active", blockMode);
+    btn.textContent = blockMode ? "✅ Concluir seleção de blocos" : "🔀 Selecionar blocos para mover";
+    document.getElementById("hint").innerHTML = blockMode
+      ? "Clique num palete ou vaga pra selecionar a rua inteira (amarelo) · Clique em outra pra somar à seleção<br>Arraste o fundo pra mover o(s) bloco(s) selecionado(s)"
+      : "Arraste o fundo para girar · Scroll para zoom<br>🟢 nova posição · 🔵 empilhar andar (máx. 4) · 🟣 nova rua · 🔴 remover topo da pilha";
+    if (!blockMode) { selectedRuas.clear(); updateBlockHighlight(); }
+    updateBlockUI();
+  };
+
+  window.toggleEditMode = function () {
+    editMode = !editMode;
+    const btn = document.getElementById("edit-toggle");
+    btn.classList.toggle("active", editMode);
+    btn.textContent = editMode ? "✅ Concluir edição" : "🛠️ Editar layout do armazém";
+    document.getElementById("legend").style.display = editMode ? "none" : "block";
+    document.getElementById("edit-legend").classList.toggle("show", editMode && !blockMode);
+    document.getElementById("block-toggle").classList.toggle("show", editMode);
+    document.getElementById("hint").innerHTML = editMode
+      ? "Arraste o fundo para girar · Scroll para zoom<br>🟢 nova posição · 🔵 empilhar andar (máx. 4) · 🟣 nova rua · 🔴 remover topo da pilha"
+      : "Arraste o fundo para girar · Scroll para zoom<br>Arraste um palete: vagas livres acendem em verde — solte em cima de uma para mover";
+    holder.classList.toggle("edit-mode", editMode);
+    if (draggingPallet) { draggingPallet.group.position.copy(dragOriginalPos); draggingPallet = null; clearAllVacancyMarkers(); }
+    if (!editMode && blockMode) window.toggleBlockMode();
+    refreshEditMarkers();
+  };
+
+  // ---------- Interação ----------
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  let isDraggingCamera = false, lastX = 0, lastY = 0, moved = 0;
+  let draggingPallet = null;
+  let dragOriginalPos = new THREE.Vector3();
+  let dragFallbackY = 0;
+
+  // Arraste do(s) bloco(s) selecionado(s) no submodo "mover blocos"
+  let groupDragActive = false;
+  let groupDragStartPoint = null;
+  let groupDragBasePos = new Map(); // unitizador -> {x,z} no início do arraste
+
+  function setMouseFromEvent(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  }
+  function raycastFrom(clientX, clientY) {
+    setMouseFromEvent(clientX, clientY);
+    raycaster.setFromCamera(mouse, camera);
+  }
+  function intersectAtY(y) {
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -y);
+    const pt = new THREE.Vector3();
+    raycaster.ray.intersectPlane(plane, pt);
+    return pt;
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(showToast._tm);
+    showToast._tm = setTimeout(() => t.classList.remove("show"), 2800);
+  }
+
+  function salvarNoServidor(p) {
+    console.log("PUT /api/paletes/" + p.unitizador, { rua: p.rua, andar: p.andar, posicao: p.pos });
+  }
+
+  holder.addEventListener("mousedown", (e) => {
+    moved = 0;
+    if (editMode && blockMode) {
+      raycastFrom(e.clientX, e.clientY);
+      groupDragStartPoint = intersectAtY(0);
+      groupDragBasePos.clear();
+      if (selectedRuas.size > 0) {
+        PALETES.forEach(p => {
+          if (selectedRuas.has(p.ruaIdx)) groupDragBasePos.set(p.unitizador, { x: p.group.position.x, z: p.group.position.z });
+        });
+        groupDragActive = true;
+      } else {
+        isDraggingCamera = true;
+        holder.classList.add("dragging-cam");
+      }
+      lastX = e.clientX; lastY = e.clientY;
+      return;
+    }
+    if (editMode) {
+      isDraggingCamera = true;
+      lastX = e.clientX; lastY = e.clientY;
+      holder.classList.add("dragging-cam");
+      return;
+    }
+    raycastFrom(e.clientX, e.clientY);
+    const hits = raycaster.intersectObjects(meshes);
+    if (hits.length) {
+      draggingPallet = hits[0].object.userData.data;
+      dragOriginalPos.copy(draggingPallet.group.position);
+      dragFallbackY = draggingPallet.group.position.y;
+      buildAllVacancyMarkers();
+      if (vacancyMarkers.length === 0) showToast("Não há vagas livres conhecidas — use 'Editar layout' pra criar capacidade");
+      holder.classList.add("dragging-pallet");
+    } else {
+      isDraggingCamera = true;
+      lastX = e.clientX; lastY = e.clientY;
+      holder.classList.add("dragging-cam");
+    }
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (groupDragActive) {
+      moved += Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0);
+      raycastFrom(e.clientX, e.clientY);
+      const pt = intersectAtY(0);
+      if (pt && groupDragStartPoint) {
+        const dx = pt.x - groupDragStartPoint.x;
+        const dz = pt.z - groupDragStartPoint.z;
+        PALETES.forEach(p => {
+          const base = groupDragBasePos.get(p.unitizador);
+          if (base) p.group.position.set(base.x + dx, p.group.position.y, base.z + dz);
+        });
+      }
+      return;
+    }
+    if (draggingPallet) {
+      moved += Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0);
+      raycastFrom(e.clientX, e.clientY);
+      const hits = raycaster.intersectObjects(vacancyMarkers);
+      if (hits.length) {
+        const target = hits[0].object;
+        setHoveredMarker(target);
+        const s = target.userData.slot;
+        const w = slotToWorld(s.ruaIdx, s.andar, s.pos);
+        draggingPallet.group.position.set(w.x, w.y + 0.25, w.z);
+      } else {
+        setHoveredMarker(null);
+        const pt = intersectAtY(dragFallbackY);
+        if (pt) draggingPallet.group.position.set(pt.x, dragFallbackY, pt.z);
+      }
+      return;
+    }
+    if (isDraggingCamera) {
+      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      moved += Math.abs(dx) + Math.abs(dy);
+      camTheta -= dx * 0.006;
+      camPhi -= dy * 0.006;
+      lastX = e.clientX; lastY = e.clientY;
+      updateCamera();
+    }
+  });
+
+  window.addEventListener("mouseup", (e) => {
+    if (groupDragActive) {
+      groupDragActive = false;
+      if (moved > 6 && groupDragStartPoint) {
+        raycastFrom(e.clientX, e.clientY);
+        const pt = intersectAtY(0);
+        const rawDx = pt.x - groupDragStartPoint.x;
+        const rawDz = pt.z - groupDragStartPoint.z;
+        const dx = Math.round(rawDx / posSpacing) * posSpacing;
+        const dz = Math.round(rawDz / posSpacing) * posSpacing;
+        const proposed = selectedCellsWithDelta(selectedRuas, dx, dz);
+        const blocked = otherRuasWorldCells(selectedRuas);
+        let colide = false;
+        for (const c of proposed) if (blocked.has(c)) { colide = true; break; }
+        if (colide) {
+          showToast("Não dá pra mover ali — colidiria com outra rua");
+        } else {
+          selectedRuas.forEach(r => { RUAS[r].origin.x += dx; RUAS[r].origin.z += dz; });
+          showToast(`Bloco(s) movido(s)`);
+        }
+      }
+      repositionAllPallets();
+      rebuildStructureVisuals();
+      refreshEditMarkers();
+      updateBlockHighlight();
+      return;
+    }
+    if (draggingPallet) {
+      const p = draggingPallet;
+      if (hoveredMarker) {
+        const s = hoveredMarker.userData.slot;
+        const oldKey = slotKey(p.ruaIdx, p.andar, p.pos);
+        const newKey = slotKey(s.ruaIdx, s.andar, s.pos);
+        occupied.delete(oldKey);
+        p.ruaIdx = s.ruaIdx; p.andar = s.andar; p.pos = s.pos;
+        p.rua = RUAS[s.ruaIdx].nome;
+        const w = slotToWorld(p.ruaIdx, p.andar, p.pos);
+        p.group.position.set(w.x, w.y, w.z);
+        occupied.set(newKey, p);
+        showToast(`Movido para ${p.rua}, andar ${p.andar}, posição ${p.pos}`);
+        salvarNoServidor(p);
+        selectPallet(p.cargo);
+        rebuildStructureVisuals();
+      } else {
+        p.group.position.copy(dragOriginalPos);
+      }
+      clearAllVacancyMarkers();
+      draggingPallet = null;
+      holder.classList.remove("dragging-pallet");
+      return;
+    }
+    isDraggingCamera = false;
+    holder.classList.remove("dragging-cam");
+  });
+
+  holder.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    camRadius += e.deltaY * 0.05;
+    updateCamera();
+  }, { passive: false });
+
+  holder.addEventListener("click", (e) => {
+    if (moved > 6) { moved = 0; return; }
+    raycastFrom(e.clientX, e.clientY);
+
+    if (editMode && blockMode) {
+      const hitsP = raycaster.intersectObjects(meshes);
+      if (hitsP.length) { toggleRuaSelection(hitsP[0].object.userData.data.ruaIdx); return; }
+      const hitsS = raycaster.intersectObjects(structureClickTargets);
+      if (hitsS.length) { toggleRuaSelection(hitsS[0].object.userData.ruaIdx); return; }
+      return;
+    }
+
+    if (editMode) {
+      const hits = raycaster.intersectObjects(editMarkers);
+      if (!hits.length) return;
+      const d = hits[0].object.userData;
+      if (d.type === "addPos") addPosToRua(d.ruaIdx);
+      else if (d.type === "addAndar") addAndarToColumn(d.ruaIdx, d.pos);
+      else if (d.type === "addRua") addRua();
+      else if (d.type === "remove") removeCell(d.ruaIdx, d.andar, d.pos);
+      return;
+    }
+
+    const hits = raycaster.intersectObjects(meshes);
+    if (hits.length) selectPallet(hits[0].object);
+  });
+
+  let selectedMesh = null;
+  function selectPallet(mesh) {
+    if (selectedMesh && selectedMesh !== mesh) {
+      const prev = selectedMesh.userData.data;
+      prev.selectEdges.visible = false;
+      prev.cargo.scale.set(1, 1, 1);
+    }
+    selectedMesh = mesh;
+    const d = mesh.userData.data;
+    d.selectEdges.visible = true;
+    d.cargo.scale.set(1.12, 1.12, 1.12);
+
+    document.getElementById("p-unit").textContent = "Palete " + d.unitizador;
+    document.getElementById("p-rua").textContent = d.rua;
+    document.getElementById("p-andar").textContent = d.andar;
+    document.getElementById("p-pos").textContent = d.pos;
+    document.getElementById("p-qtd").textContent = d.totalQtd.toLocaleString("pt-BR") + " un.";
+
+    const prodList = document.getElementById("p-produtos");
+    prodList.innerHTML = "";
+    d.produtos.forEach(pr => {
+      const row = document.createElement("div");
+      row.className = "prod-row";
+      row.innerHTML = `<span class="code">${pr.codigo}</span><span>${pr.qtd.toLocaleString("pt-BR")} un.</span>`;
+      prodList.appendChild(row);
+    });
+
+    document.getElementById("panel").classList.add("visible");
+  }
+  window.deselect = function () {
+    if (selectedMesh) {
+      const d = selectedMesh.userData.data;
+      d.selectEdges.visible = false;
+      d.cargo.scale.set(1, 1, 1);
+    }
+    selectedMesh = null;
+    document.getElementById("panel").classList.remove("visible");
+  };
+
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  let t = 0;
+  function animate() {
+    requestAnimationFrame(animate);
+    t += 0.05;
+    const pulse = 0.5 + Math.sin(t) * 0.5;
+    editMarkers.forEach(m => { m.material.opacity = 0.4 + pulse * 0.35; });
+    renderer.render(scene, camera);
+  }
+  animate();
+})();
+</script>
+</body>
+</html>
