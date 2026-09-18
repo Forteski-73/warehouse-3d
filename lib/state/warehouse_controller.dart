@@ -115,7 +115,6 @@ class WarehouseController extends ChangeNotifier {
   // ---------------- Edit mode / layout building ----------------
 
   void toggleEditMode() {
-    debugPrint('CTRL toggleEditMode called, was editMode=$editMode blockMode=$blockMode');
     editMode = !editMode;
     selectedPalletId = null;
     if (!editMode && blockMode) {
@@ -245,7 +244,6 @@ class WarehouseController extends ChangeNotifier {
   // ---------------- Block mode: move/rotate whole streets ----------------
 
   void toggleBlockMode() {
-    debugPrint('CTRL toggleBlockMode called, editMode=$editMode was blockMode=$blockMode');
     if (!editMode) return;
     blockMode = !blockMode;
     if (!blockMode) selectedRuas.clear();

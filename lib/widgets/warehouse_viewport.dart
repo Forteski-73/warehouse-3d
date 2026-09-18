@@ -320,7 +320,6 @@ class _WarehouseViewportState extends State<WarehouseViewport> with SingleTicker
   }
 
   void _handleTap(Offset position) {
-    debugPrint('VIEWPORT _handleTap at $position editMode=${_c.editMode} blockMode=${_c.blockMode}');
     final frame = _buildFrame();
 
     if (_c.editMode && _c.blockMode) {
